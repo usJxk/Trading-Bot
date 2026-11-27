@@ -40,6 +40,7 @@ tardar mas. Usa el parametro `step` para saltar velas y acelerar si hace falta.
 """
 
 import pandas as pd
+import numpy as np
 
 
 def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
@@ -116,6 +117,11 @@ def run_backtest(
     """
     import strategy  # import local para evitar dependencia circular en algunos entornos
 
+    if min_candles < 30 or step < 1 or max_bars_in_trade < 1:
+        raise ValueError("Se requieren al menos 30 velas iniciales y pasos positivos.")
+    if not all(np.isfinite(value) and value > 0 for value in (sl_atr, tp_atr)):
+        raise ValueError("Las distancias de salida deben ser positivas y finitas.")
+
     strategy_kwargs = strategy_kwargs or {}
     atr_series = _atr(df)
     n = len(df)
@@ -164,6 +170,15 @@ def run_backtest(
             hit_sl = (bar["Low"] <= sl) if side == "COMPRA" else (bar["High"] >= sl)
             hit_tp = (bar["High"] >= tp) if side == "COMPRA" else (bar["Low"] <= tp)
 
+            opening = float(bar["Open"])
+            gap_stop = opening <= sl if side == "COMPRA" else opening >= sl
+            gap_target = opening >= tp if side == "COMPRA" else opening <= tp
+            if gap_stop:
+                outcome, exit_price, exit_index = "LOSS", opening, j
+                break
+            if gap_target:
+                outcome, exit_price, exit_index = "WIN", tp, j
+                break
             if hit_sl:
                 # si ambos se tocan en la misma vela, se asume el peor caso (SL primero)
                 outcome, exit_price, exit_index = "LOSS", sl, j
@@ -193,7 +208,7 @@ def run_backtest(
             "tp": tp,
             "exit_price": exit_price,
             "outcome": outcome,
-            "r_multiple": round(r_multiple, 3),
+            "r_multiple": r_multiple,
             "score": result["score"],
             "bias": result["bias"],
         })
@@ -241,9 +256,9 @@ def apply_money_simulation(
     for t in trades:
         riesgo_dinero = capital * (riesgo_pct / 100.0)
         costo_r = commission_r + spread_r + slippage_r
-        r_neto = t["r_multiple"] - costo_r if t["r_multiple"] >= 0 else t["r_multiple"] - costo_r
+        r_neto = t["r_multiple"] - costo_r
 
-        pnl_money = riesgo_dinero * r_neto
+        pnl_money = max(-capital, riesgo_dinero * r_neto)
         capital += pnl_money
 
         t2 = dict(t)
