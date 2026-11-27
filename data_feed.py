@@ -10,6 +10,7 @@ Finance (por ejemplo MSFT, TSLA, BTC-USD, ^GSPC, etc.).
 
 import yfinance as yf
 import pandas as pd
+import numpy as np
 
 # Alias -> ticker real de Yahoo Finance
 SYMBOL_ALIASES = {
@@ -35,11 +36,14 @@ SYMBOL_ALIASES = {
 
 # Intervalos permitidos en la app -> (interval de yfinance, periodo de descarga)
 TIMEFRAMES = {
+    "1m": ("1m", "7d"),
+    "2m": ("2m", "60d"),
     "15m": ("15m", "60d"),
     "30m": ("30m", "60d"),
     "1h": ("1h", "730d"),
     "4h": ("1h", "730d"),   # se resamplea a partir de 1h, yfinance no tiene 4h nativo
     "1d": ("1d", "5y"),
+    "1wk": ("1wk", "10y"),
 }
 
 
@@ -67,6 +71,8 @@ def fetch_ohlcv(user_symbol: str, timeframe: str = "1h") -> pd.DataFrame:
         progress=False,
         auto_adjust=True,
         multi_level_index=False,
+        timeout=10,
+        threads=False,
     )
 
     if raw is None or raw.empty:
@@ -76,13 +82,22 @@ def fetch_ohlcv(user_symbol: str, timeframe: str = "1h") -> pd.DataFrame:
         )
 
     raw = raw.rename(columns=str.title)
-    raw = raw[["Open", "High", "Low", "Close", "Volume"]].dropna()
+    raw = raw[["Open", "High", "Low", "Close", "Volume"]]
+    raw = raw.replace([np.inf, -np.inf], np.nan).dropna().sort_index()
+    raw = raw.loc[~raw.index.duplicated(keep="last")]
+    raw = raw.loc[
+        (raw["Low"] <= raw[["Open", "Close"]].min(axis=1))
+        & (raw["High"] >= raw[["Open", "Close"]].max(axis=1))
+        & (raw["Volume"] >= 0)
+    ]
 
     if timeframe == "4h":
         raw = raw.resample("4h").agg({
             "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum",
         }).dropna()
 
+    if raw.empty:
+        raise ValueError("El proveedor no devolvió velas válidas.")
     return raw
 
 

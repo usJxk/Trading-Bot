@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="terminal-token" content="{{ token }}">
+  <meta name="color-scheme" content="dark">
+  <title>Mesa · Trading-Bot</title>
+  <link rel="icon" href="{{ url_for('static', filename='mesa.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script type="module" src="{{ url_for('static', filename='app.js') }}"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Ir al contenido</a>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="wordmark"><span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i></span><div><strong>Mesa</strong><small>Trading-Bot</small></div></div>
+      <nav aria-label="Vistas principales">
+        <button type="button" data-view="market" aria-current="page"><span aria-hidden="true">⌁</span> Mercado</button>
+        <button type="button" data-view="backtest"><span aria-hidden="true">◷</span> Backtesting</button>
+        <button type="button" data-view="journal"><span aria-hidden="true">▤</span> Diario</button>
+      </nav>
+      <section class="watch" aria-labelledby="watch-heading">
+        <div class="watch-head"><h2 id="watch-heading">Seguimiento</h2><button type="button" id="watch-add" class="icon-button" aria-label="Guardar el símbolo del gráfico" title="Guardar el símbolo del gráfico">+</button></div>
+        <div id="watch-list"></div>
+        <p class="watch-caption" id="watch-caption">Símbolos de ejemplo</p>
+      </section>
+      <footer><span class="local-dot"></span> Guardado local</footer>
+    </aside>
+    <main id="main">
+      <header class="topline">
+        <span id="view-title">Mercado</span>
+        <label id="market-source" class="source-select"><span>Datos</span><select id="source" aria-label="Fuente de datos"><option value="demo">Serie de ejemplo</option><option value="yahoo">Yahoo Finance</option></select></label>
+      </header>
+      <div class="workspace">
+        <div id="market" class="view">
+          <header class="intro">
+            <div><h1>Explorador de mercado</h1><p>Velas históricas, niveles y señales de la estrategia.</p></div>
+            <form id="search" class="search-form">
+              <label class="sr-only" for="symbol">Símbolo</label>
+              <input id="symbol" name="symbol" value="AAPL" maxlength="24" autocomplete="off" spellcheck="false" placeholder="AAPL" required>
+              <button class="primary" type="submit">Analizar</button>
+            </form>
+          </header>
+          <div id="market-feedback" hidden>
+            <p id="market-loading" class="help" role="status" hidden></p>
+            <p id="market-error" class="error" role="alert" hidden></p>
+          </div>
+          <div class="market-layout">
+            <section class="panel market-panel" aria-labelledby="instrument">
+              <header class="instrument">
+                <div><div class="instrument-label"><span class="ticker-chip" id="ticker-chip">A</span><h2 id="instrument">AAPL</h2><span id="chart-interval" class="tag interval-tag">1h</span><span class="tag" id="source-tag">Ejemplo</span></div>
+                <div class="quote"><strong id="quote">—</strong><span id="change"></span></div></div>
+                <div class="chart-options"><div id="intervals" class="segmented" aria-label="Intervalo de las velas">
+                  <button data-interval="15m">15m</button><button data-interval="30m">30m</button><button data-interval="1h" aria-pressed="true">1h</button><button data-interval="4h">4h</button><button data-interval="1d">1D</button>
+                </div><label class="check"><input type="checkbox" id="zones" checked> Zonas</label></div>
+              </header>
+              <div class="chart-tools">
+                <label>Vista<select id="chart-depth"><option value="auto">Automática</option><option value="near">Detalle</option><option value="wide">Panorámica</option></select></label>
+                <div class="chart-navigation" aria-label="Recorrer el histórico">
+                  <button type="button" id="chart-prev" aria-label="Velas anteriores" title="Velas anteriores">‹</button>
+                  <button type="button" id="chart-next" aria-label="Velas posteriores" title="Velas posteriores">›</button>
+                  <button type="button" id="chart-latest">Últimas</button>
+                </div>
+                <button type="button" id="use-chart">Simular este gráfico</button>
+              </div>
+              <div class="chart-shell">
+                <canvas id="price-chart" tabindex="0" aria-label="Gráfico de velas históricas. Usa las flechas para consultar cada vela y las teclas Re Pág o Av Pág para recorrer el histórico."></canvas>
+                <div class="chart-empty" id="chart-empty">Cargando velas…</div>
+              </div>
+              <footer class="chart-foot"><span id="candle-detail" aria-live="off">Apertura, máximo, mínimo y cierre</span><span id="market-date"></span></footer>
+            </section>
+            <section class="panel signals" aria-labelledby="signals-heading">
+              <header><h2 id="signals-heading">Lectura técnica</h2><p>Calculada al cierre de la última vela.</p></header>
+              <div class="bias-block"><span>Sesgo de la estrategia</span><strong id="bias">—</strong><div class="score-line"><span>Puntuación</span><strong id="score">—</strong></div></div>
+              <h3>Qué detectó</h3>
+              <ul id="reasons"><li>Las señales aparecen al cargar el gráfico.</li></ul>
+              <footer><span class="legend-dot up"></span> Alcista <span class="legend-dot down"></span> Bajista</footer>
+            </section>
+          </div>
+          <dl class="market-stats">
+            <div><dt>Fuente</dt><dd id="stat-source">Serie de ejemplo</dd></div>
+            <div><dt>Ticker</dt><dd id="stat-ticker">—</dd></div>
+            <div><dt>Volumen de la última vela</dt><dd id="stat-volume">—</dd></div>
+            <div><dt>Estructura de mercado</dt><dd id="stat-trend">—</dd></div>
+          </dl>
+        </div>
+
+        <div id="backtest" class="view" hidden>
+          <header class="intro"><div><h1>Backtesting</h1><p>Simula la estrategia sobre velas ya cerradas y revisa cada operación.</p></div></header>
+          <div class="backtest-layout">
+            <form id="backtest-form" class="panel form-panel">
+              <h2>Configurar simulación</h2>
+              <div class="fields">
+                <label>Símbolo<input name="symbol" value="AAPL" maxlength="24" required></label>
+                <label>Intervalo<select name="interval"><option>1m</option><option>2m</option><option>15m</option><option>30m</option><option selected>1h</option><option>4h</option><option>1d</option><option>1wk</option></select></label>
+                <label class="wide">Fuente<select name="source"><option value="demo">Serie de ejemplo</option><option value="yahoo">Yahoo Finance</option></select></label>
+                <label>Velas<input type="number" name="limit" min="60" max="600" value="300" required></label>
+                <label>Puntuación mínima<input type="number" name="score" min="1" max="10" value="3" required></label>
+                <label>Stop (ATR)<input type="number" name="sl" min=".1" max="10" step=".1" value="1" required></label>
+                <label>Objetivo (ATR)<input type="number" name="tp" min=".1" max="20" step=".1" value="2" required></label>
+                <label class="wide">Coste por operación (R)<input type="number" name="cost" min="0" max="2" step=".01" value="0" required></label>
+              </div>
+              <div class="button-row"><button type="submit" class="primary">Ejecutar simulación</button><button type="button" id="cancel-backtest" hidden>Cancelar</button></div>
+              <div id="backtest-progress" class="job-progress" hidden>
+                <progress id="backtest-bar" max="100" aria-label="Progreso de la simulación"></progress>
+                <p id="backtest-status" class="help" role="status"></p>
+              </div>
+              <p class="help">R equivale a la distancia entre la entrada y el stop inicial. ATR mide la amplitud reciente del precio.</p>
+              <p id="backtest-error" class="error" role="alert" hidden></p>
+            </form>
+            <section class="panel result-panel" aria-labelledby="result-heading">
+              <header><h2 id="result-heading">Resultado</h2><p id="result-caption">Elige una configuración y ejecuta la simulación.</p></header>
+              <dl id="result-stats" class="result-stats"></dl>
+              <canvas id="equity-chart" aria-label="Gráfico del resultado acumulado medido en R" hidden></canvas>
+              <p id="result-note" class="help" hidden></p>
+              <div class="button-row" id="export-buttons" hidden><button data-export="csv">Exportar CSV</button><button data-export="json">Exportar JSON</button></div>
+            </section>
+          </div>
+          <section class="panel table-panel" id="result-trades" hidden>
+            <header><h2>Operaciones simuladas</h2></header>
+            <div class="table-scroll"><table><thead><tr><th>Entrada</th><th>Lado</th><th>Precio de entrada</th><th>Precio de salida</th><th>Resultado (R)</th></tr></thead><tbody id="result-rows"></tbody></table></div>
+          </section>
+          <section class="panel table-panel">
+            <header><h2>Historial</h2><p>Las simulaciones se guardan al terminar.</p></header>
+            <div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Símbolo</th><th>Intervalo</th><th>Velas</th><th>Resultado (R)</th><th>Acciones</th></tr></thead><tbody id="history"></tbody></table></div>
+          </section>
+        </div>
+
+        <div id="journal" class="view" hidden>
+          <header class="intro"><div><h1>Diario de práctica</h1><p>Registra tus operaciones simuladas y revisa cómo terminaron.</p></div><button id="trade-add" class="primary">Registrar operación</button></header>
+          <section class="panel table-panel">
+            <header><h2>Operaciones</h2><label>Mostrar <select id="journal-filter"><option value="">Todas</option><option value="ABIERTA">Abiertas</option><option value="CERRADA">Cerradas</option></select></label></header>
+            <div class="table-scroll"><table><thead><tr><th>Símbolo</th><th>Lado</th><th>Entrada</th><th>Cierre</th><th>Variación</th><th>Plan y nota</th><th>Acción</th></tr></thead><tbody id="journal-rows"></tbody></table></div>
+          </section>
+        </div>
+        <p id="toast" class="toast" role="status" aria-live="polite" hidden></p>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="trade-dialog" aria-labelledby="trade-dialog-title">
+    <form id="trade-form" class="form-panel dialog-form">
+      <header><h2 id="trade-dialog-title">Registrar operación</h2><button type="button" class="icon-button" data-dialog-close aria-label="Cerrar formulario">×</button></header>
+      <div class="fields">
+        <label>Símbolo<input name="symbol" maxlength="24" required></label>
+        <label>Lado<select name="side"><option value="COMPRA">Compra</option><option value="VENTA">Venta</option></select></label>
+        <label>Entrada<input name="entry" type="number" min=".0000000001" step="any" required></label>
+        <label>Cantidad (opcional)<input name="size" type="number" min=".0000000001" step="any"></label>
+        <label>Stop (opcional)<input name="stop" type="number" min=".0000000001" step="any"></label>
+        <label>Objetivo (opcional)<input name="target" type="number" min=".0000000001" step="any"></label>
+        <label class="wide">Nota<textarea name="notes" rows="3" maxlength="1000"></textarea></label>
+      </div>
+      <p class="error" role="alert" hidden></p>
+      <button class="primary" type="submit">Guardar operación</button>
+    </form>
+  </dialog>
+  <dialog id="close-dialog" aria-labelledby="close-dialog-title">
+    <form id="close-form" class="form-panel dialog-form">
+      <header><h2 id="close-dialog-title">Cerrar operación</h2><button type="button" class="icon-button" data-dialog-close aria-label="Cerrar formulario">×</button></header>
+      <p id="close-context" class="help"> </p>
+      <label>Precio de cierre<input name="close" type="number" min=".0000000001" step="any" required></label>
+      <p class="error" role="alert" hidden></p>
+      <button class="primary" type="submit">Guardar cierre</button>
+    </form>
+  </dialog>
+</body>
+</html>

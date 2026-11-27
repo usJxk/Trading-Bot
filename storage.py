@@ -13,7 +13,9 @@ import json
 import os
 from datetime import datetime, timezone
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trading_bot.db")
+DB_PATH = os.environ.get("TRADING_BOT_DB") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "trading_bot.db"
+)
 
 
 def get_connection():
@@ -139,12 +141,13 @@ def log_trade(symbol, side, entry_price, stop_loss=None, take_profit=None, size=
 
 def close_trade(trade_id: int, close_price: float):
     conn = get_connection()
-    conn.execute(
-        "UPDATE trades SET status = 'CERRADA', close_price = ?, closed_at = ? WHERE id = ?",
+    cur = conn.execute(
+        "UPDATE trades SET status = 'CERRADA', close_price = ?, closed_at = ? WHERE id = ? AND status = 'ABIERTA'",
         (close_price, _now(), trade_id),
     )
     conn.commit()
     conn.close()
+    return cur.rowcount == 1
 
 
 def get_trades(status: str | None = None) -> list:

@@ -33,53 +33,13 @@ GREEN = "#22c55e"
 RED = "#ef4444"
 ACCENT = "#3b82f6"
 
-# Timeframes soportados por Yahoo Finance que expone data_feed.TIMEFRAMES,
-# mas los intradia cortos que pidieron (1m/2m) -- se agregan aqui sin tocar
-# data_feed.py, ya que yfinance si los soporta nativamente.
-EXTRA_TIMEFRAMES = {
-    "1m": ("1m", "7d"),
-    "2m": ("2m", "60d"),
-    "1wk": ("1wk", "10y"),
-}
-
-
 def _all_timeframes() -> dict:
-    tfs = dict(data_feed.TIMEFRAMES)
-    tfs.update(EXTRA_TIMEFRAMES)
-    # orden logico
-    order = ["1m", "2m", "15m", "30m", "1h", "4h", "1d", "1wk"]
-    return {k: tfs[k] for k in order if k in tfs}
+    return data_feed.TIMEFRAMES
 
 
 def _fetch_ohlcv_any_timeframe(symbol, timeframe, num_candles):
-    """
-    Usa data_feed.resolve_symbol() (existente) pero permite timeframes extra
-    (1m, 2m, 1wk) que data_feed.TIMEFRAMES no tiene, sin modificar data_feed.py.
-    Luego recorta a las ultimas `num_candles` velas.
-    """
-    import yfinance as yf
-
-    all_tfs = _all_timeframes()
-    if timeframe not in all_tfs:
-        raise ValueError(f"Timeframe no soportado: {timeframe}")
-    interval, period = all_tfs[timeframe]
-    ticker = data_feed.resolve_symbol(symbol)
-
-    raw = yf.download(tickers=ticker, interval=interval, period=period,
-                       progress=False, auto_adjust=True, multi_level_index=False)
-    if raw is None or raw.empty:
-        raise ValueError(f"No se pudieron descargar datos para '{symbol}' (ticker: '{ticker}').")
-
-    raw = raw.rename(columns=str.title)[["Open", "High", "Low", "Close", "Volume"]].dropna()
-
-    if timeframe == "4h":
-        raw = raw.resample("4h").agg({"Open": "first", "High": "max", "Low": "min",
-                                       "Close": "last", "Volume": "sum"}).dropna()
-
-    if num_candles and len(raw) > num_candles:
-        raw = raw.iloc[-num_candles:]
-
-    return raw
+    raw = data_feed.fetch_ohlcv(symbol, timeframe)
+    return raw.tail(num_candles) if num_candles else raw
 
 
 class BacktestWindow(tk.Toplevel):
@@ -229,7 +189,7 @@ class BacktestWindow(tk.Toplevel):
         try:
             df = _fetch_ohlcv_any_timeframe(symbol, timeframe, num_candles)
         except Exception as exc:
-            self.after(0, lambda: self._on_error(str(exc)))
+            self.after(0, self._on_error, str(exc))
             return
 
         def progress_cb(i, n):
@@ -250,7 +210,7 @@ class BacktestWindow(tk.Toplevel):
                 equity_curve_money=money["equity_curve_money"], capital_inicial=capital,
             )
         except Exception as exc:
-            self.after(0, lambda: self._on_error(str(exc)))
+            self.after(0, self._on_error, str(exc))
             return
 
         self.after(0, lambda: self._on_backtest_done(symbol, timeframe, num_candles, capital, risk_pct,
@@ -443,7 +403,7 @@ class BacktestWindow(tk.Toplevel):
         try:
             df = _fetch_ohlcv_any_timeframe(symbol, timeframe, num_candles)
         except Exception as exc:
-            self.after(0, lambda: messagebox.showerror("Error", str(exc)))
+            self.after(0, messagebox.showerror, "Error", str(exc))
             return
 
         def progress_cb(i, n):
@@ -453,7 +413,7 @@ class BacktestWindow(tk.Toplevel):
         try:
             ranking = optimizer.run_optimization_presets(df, min_scores=scores, progress_callback=progress_cb)
         except Exception as exc:
-            self.after(0, lambda: messagebox.showerror("Error", str(exc)))
+            self.after(0, messagebox.showerror, "Error", str(exc))
             return
 
         self.after(0, lambda: self._on_optimizer_done(ranking))
@@ -506,7 +466,8 @@ class BacktestWindow(tk.Toplevel):
         for h in storage.get_backtest_history():
             self.hist_tree.insert("", "end", iid=str(h["id"]), values=(
                 h["fecha"][:19].replace("T", " "), h["symbol"], h["timeframe"], h["num_candles"],
-                h["profit_factor"], h["winrate_pct"], h["beneficio_pct"], h["max_drawdown_r"],
+                h["profit_factor"], h["winrate_pct"],
+                h["beneficio_pct"] if h["beneficio_pct"] is not None else "—", h["max_drawdown_r"],
             ))
 
     def _delete_selected_history(self):

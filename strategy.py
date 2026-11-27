@@ -2,15 +2,15 @@
 strategy.py
 Motor de analisis tecnico: estructura de mercado (ICT/SMC), Fair Value Gaps,
 Order Blocks, barridos de liquidez, zonas premium/discount y una
-aproximacion de "footprint" (presion compradora/vendedora por vela).
+aproximacion de "footprint" (presión compradora/vendedora por vela).
 
 IMPORTANTE sobre el footprint:
 Un footprint real necesita datos tick-by-tick de volumen por nivel de precio
 (bid/ask). Yahoo Finance (la fuente de datos gratuita que usa este bot) no
 entrega eso. Aqui se calcula una APROXIMACION del delta comprador/vendedor
 usando el volumen total de la vela y la posicion del cierre dentro del rango
-de la vela (si cierra cerca del maximo, se asume mas presion compradora; si
-cierra cerca del minimo, mas presion vendedora). Es una heuristica muy usada
+de la vela (si cierra cerca del maximo, se asume mas presión compradora; si
+cierra cerca del minimo, mas presión vendedora). Es una heuristica muy usada
 en retail, pero no reemplaza un footprint institucional real basado en tick data.
 """
 
@@ -31,13 +31,13 @@ def find_swings(df: pd.DataFrame, left: int = 2, right: int = 2) -> pd.DataFrame
     swing_high = np.zeros(n, dtype=bool)
     swing_low = np.zeros(n, dtype=bool)
 
-    for i in range(left, n - right):
-        window_h = highs[i - left:i + right + 1]
-        window_l = lows[i - left:i + right + 1]
-        if highs[i] == window_h.max() and np.argmax(window_h) == left:
-            swing_high[i] = True
-        if lows[i] == window_l.min() and np.argmin(window_l) == left:
-            swing_low[i] = True
+    size = left + right + 1
+    if n >= size:
+        windows_h = np.lib.stride_tricks.sliding_window_view(highs, size)
+        windows_l = np.lib.stride_tricks.sliding_window_view(lows, size)
+        # argmax/min keep the first match, as in the original fractal rule.
+        swing_high[left:n - right] = (windows_h.argmax(axis=1) == left) & ~np.isnan(windows_h).any(axis=1)
+        swing_low[left:n - right] = (windows_l.argmin(axis=1) == left) & ~np.isnan(windows_l).any(axis=1)
 
     out = df.copy()
     out["swing_high"] = swing_high
@@ -124,11 +124,11 @@ def find_fvgs(df: pd.DataFrame, max_lookback: int = 60) -> list:
     n = len(df)
     start = max(2, n - max_lookback)
 
+    highs = df["High"].to_numpy()
+    lows = df["Low"].to_numpy()
     for i in range(start, n):
-        high_2 = df["High"].iloc[i - 2]
-        low_2 = df["Low"].iloc[i - 2]
-        high_i = df["High"].iloc[i]
-        low_i = df["Low"].iloc[i]
+        high_2, high_i = highs[i - 2], highs[i]
+        low_2, low_i = lows[i - 2], lows[i]
 
         if low_i > high_2:
             zone_low, zone_high = high_2, low_i
@@ -139,11 +139,7 @@ def find_fvgs(df: pd.DataFrame, max_lookback: int = 60) -> list:
         else:
             continue
 
-        mitigated = False
-        for j in range(i + 1, n):
-            if df["Low"].iloc[j] <= zone_high and df["High"].iloc[j] >= zone_low:
-                mitigated = True
-                break
+        mitigated = bool(np.any((lows[i + 1:] <= zone_high) & (highs[i + 1:] >= zone_low)))
 
         fvgs.append({
             "index": i,
@@ -170,48 +166,36 @@ def find_order_blocks(df: pd.DataFrame, impulse_pct: float = 0.5, max_lookback: 
     """
     n = len(df)
     start = max(3, n - max_lookback)
-    atr = (df["High"] - df["Low"]).rolling(14).mean()
+    ranges = df["High"] - df["Low"]
+    average_ranges = ranges.rolling(14).mean().fillna(ranges).to_numpy()
+    highs, lows = df["High"].to_numpy(), df["Low"].to_numpy()
+    bodies = df["Close"].to_numpy() - df["Open"].to_numpy()
 
-    blocks = []
+    active = []
     for i in range(start, n - 1):
-        move = df["Close"].iloc[i + 1] - df["Open"].iloc[i + 1]
-        avg_range = atr.iloc[i] if not np.isnan(atr.iloc[i]) else (df["High"].iloc[i] - df["Low"].iloc[i])
+        move, avg_range = bodies[i + 1], average_ranges[i]
         if avg_range == 0 or np.isnan(avg_range):
             continue
         strength = abs(move) / avg_range
+        if not strength >= 1 + impulse_pct:
+            continue
+        if move > 0 and bodies[i] < 0:
+            direction = "ALCISTA"
+        elif move < 0 and bodies[i] > 0:
+            direction = "BAJISTA"
+        else:
+            continue
+        if np.any((lows[i + 1:] <= highs[i]) & (highs[i + 1:] >= lows[i])):
+            continue
+        active.append({
+            "index": i,
+            "timestamp": df.index[i],
+            "direction": direction,
+            "zone_low": float(lows[i]),
+            "zone_high": float(highs[i]),
+        })
 
-        is_bear_candle = df["Close"].iloc[i] < df["Open"].iloc[i]
-        is_bull_candle = df["Close"].iloc[i] > df["Open"].iloc[i]
-
-        if strength >= (1 + impulse_pct) and move > 0 and is_bear_candle:
-            blocks.append({
-                "index": i,
-                "timestamp": df.index[i],
-                "direction": "ALCISTA",
-                "zone_low": float(df["Low"].iloc[i]),
-                "zone_high": float(df["High"].iloc[i]),
-            })
-        elif strength >= (1 + impulse_pct) and move < 0 and is_bull_candle:
-            blocks.append({
-                "index": i,
-                "timestamp": df.index[i],
-                "direction": "BAJISTA",
-                "zone_low": float(df["Low"].iloc[i]),
-                "zone_high": float(df["High"].iloc[i]),
-            })
-
-    # Filtra los que ya fueron mitigados (precio volvio a tocarlos)
-    active_blocks = []
-    for b in blocks:
-        touched = False
-        for j in range(b["index"] + 1, n):
-            if df["Low"].iloc[j] <= b["zone_high"] and df["High"].iloc[j] >= b["zone_low"]:
-                touched = True
-                break
-        if not touched:
-            active_blocks.append(b)
-
-    return active_blocks[-5:]  # los 5 mas recientes sin mitigar
+    return active[-5:]
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +243,7 @@ def premium_discount(df: pd.DataFrame, lookback: int = 50) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Footprint aproximado (presion compradora / vendedora por volumen)
+# Footprint aproximado (presión compradora / vendedora por volumen)
 # ---------------------------------------------------------------------------
 
 def footprint_approx(df: pd.DataFrame, lookback: int = 10) -> dict:
@@ -337,26 +321,26 @@ def analyze(
     if use_trend:
         if struct["trend"] == "ALCISTA":
             score += 2
-            reasons.append("Estructura de mercado alcista (maximos y minimos ascendentes).")
+            reasons.append("Estructura de mercado alcista (máximos y mínimos ascendentes).")
         elif struct["trend"] == "BAJISTA":
             score -= 2
-            reasons.append("Estructura de mercado bajista (maximos y minimos descendentes).")
+            reasons.append("Estructura de mercado bajista (máximos y mínimos descendentes).")
 
     if use_bos:
         if struct["last_bos"] == "ALCISTA":
             score += 1
-            reasons.append("Ultimo Break of Structure (BOS) fue alcista.")
+            reasons.append("El cierre superó el último máximo de referencia (BOS).")
         elif struct["last_bos"] == "BAJISTA":
             score -= 1
-            reasons.append("Ultimo Break of Structure (BOS) fue bajista.")
+            reasons.append("El cierre quedó por debajo del último mínimo de referencia (BOS).")
 
     if use_choch and struct["choch"]:
         if struct["last_bos"] == "ALCISTA":
             score += 1
-            reasons.append("Posible Change of Character (CHoCH) hacia alcista.")
+            reasons.append("Posible cambio de estructura hacia alcista (CHoCH).")
         elif struct["last_bos"] == "BAJISTA":
             score -= 1
-            reasons.append("Posible Change of Character (CHoCH) hacia bajista.")
+            reasons.append("Posible cambio de estructura hacia bajista (CHoCH).")
 
     if use_fvg:
         nearby_fvgs = [f for f in active_fvgs if f["zone_low"] * 0.99 <= last_close <= f["zone_high"] * 1.01]
@@ -389,18 +373,18 @@ def analyze(
     if use_premium_discount:
         if pd_zone["zone"] == "DISCOUNT":
             score += 1
-            reasons.append("Precio en zona de descuento (discount) del rango reciente, favorable para compras.")
+            reasons.append("El cierre está en la mitad inferior del rango reciente (descuento).")
         else:
             score -= 1
-            reasons.append("Precio en zona de premium del rango reciente, favorable para ventas.")
+            reasons.append("El cierre está en la mitad superior del rango reciente (prima).")
 
     if use_footprint:
         if fp["bias"] == "ALCISTA":
             score += 1
-            reasons.append(f"Footprint aproximado muestra presion compradora (delta +{fp['delta_pct']:.1f}%).")
+            reasons.append(f"Footprint aproximado muestra presión compradora (delta +{fp['delta_pct']:.1f}%).")
         elif fp["bias"] == "BAJISTA":
             score -= 1
-            reasons.append(f"Footprint aproximado muestra presion vendedora (delta {fp['delta_pct']:.1f}%).")
+            reasons.append(f"Footprint aproximado muestra presión vendedora (delta {fp['delta_pct']:.1f}%).")
 
     if score >= 3:
         bias = "ALCISTA"

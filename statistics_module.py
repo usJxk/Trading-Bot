@@ -136,11 +136,13 @@ def compute_full_stats(
         out["beneficio_pct"] = round((equity_curve_money[-1] - capital_inicial) / capital_inicial * 100, 2)
 
         peak_m = equity_curve_money[0]
-        max_dd_m = 0.0
+        max_dd_m = max_dd_pct = 0.0
         for v in equity_curve_money:
             peak_m = max(peak_m, v)
             max_dd_m = max(max_dd_m, peak_m - v)
+            if peak_m > 0:
+                max_dd_pct = max(max_dd_pct, (peak_m - v) / peak_m)
         out["max_drawdown_money"] = round(max_dd_m, 2)
-        out["max_drawdown_pct"] = round(max_dd_m / peak_m * 100, 2) if peak_m else 0.0
+        out["max_drawdown_pct"] = round(max_dd_pct * 100, 2)
 
     return out

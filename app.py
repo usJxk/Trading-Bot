@@ -240,7 +240,7 @@ class TradingBotApp(tk.Tk):
             df = data_feed.fetch_ohlcv(symbol, timeframe)
             result = strategy.analyze(df)
         except Exception as exc:
-            self.after(0, lambda: self._on_analyze_error(str(exc)))
+            self.after(0, self._on_analyze_error, str(exc))
             return
         self.after(0, lambda: self._on_analyze_success(symbol, timeframe, df, result))
 
